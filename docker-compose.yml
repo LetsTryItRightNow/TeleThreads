@@ -5,4 +5,4 @@ services:
     container_name: telethreads
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8088:8080"
