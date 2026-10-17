@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "TeleThreads": {
+      "commandName": "Project"
+    },
+    "Container (Dockerfile)": {
+      "commandName": "Docker"
+    }
+  }
+}
