@@ -1,7 +1,11 @@
 {
   "profiles": {
     "TeleThreads": {
-      "commandName": "Project"
+      "commandName": "Project",
+      "applicationUrl": "http://localhost:8080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      }
     },
     "Container (Dockerfile)": {
       "commandName": "Docker"
