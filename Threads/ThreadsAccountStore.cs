@@ -10,6 +10,8 @@ public sealed class ThreadsAccountStore(PostRepository repository)
     private const string UsernameKey = "threads_username";
     private const string TokenKey = "threads_access_token";
     private const string CheckedAtKey = "threads_token_checked_at";
+    // Left over from the version that took the token from config.
+    private const string LegacySeedKey = "threads_seed_token";
 
     public ThreadsAccount? Get() =>
         repository.GetSetting(UserIdKey) is { } userId && repository.GetSetting(TokenKey) is { } token
@@ -25,18 +27,34 @@ public sealed class ThreadsAccountStore(PostRepository repository)
     {
         repository.SetSetting(UserIdKey, account.UserId);
         repository.SetSetting(UsernameKey, account.Username);
-        UpdateToken(account.AccessToken, now);
+        SetToken(account.AccessToken, now);
     }
 
-    public void UpdateToken(string token, DateTime now)
+    // No-op when the account was reconnected or removed while the old token was being refreshed.
+    public void UpdateToken(string oldToken, string newToken, DateTime now)
     {
-        repository.SetSetting(TokenKey, token);
-        repository.SetSetting(CheckedAtKey, now.ToString("O", CultureInfo.InvariantCulture));
+        if (Get()?.AccessToken == oldToken)
+            SetToken(newToken, now);
+    }
+
+    // Meta's deauthorization callbacks name the user; an unrelated user must not remove the connected account.
+    public bool ClearIfUser(string userId)
+    {
+        if (Get()?.UserId != userId)
+            return false;
+        Clear();
+        return true;
     }
 
     public void Clear()
     {
-        foreach (var key in new[] { UserIdKey, UsernameKey, TokenKey, CheckedAtKey })
+        foreach (var key in new[] { UserIdKey, UsernameKey, TokenKey, CheckedAtKey, LegacySeedKey })
             repository.DeleteSetting(key);
+    }
+
+    private void SetToken(string token, DateTime now)
+    {
+        repository.SetSetting(TokenKey, token);
+        repository.SetSetting(CheckedAtKey, now.ToString("O", CultureInfo.InvariantCulture));
     }
 }

@@ -41,6 +41,21 @@ public class OAuthStateStoreTests
     }
 
     [Fact]
+    public void WhenFull_OldestStateIsEvicted()
+    {
+        var store = new OAuthStateStore(_time);
+        var first = store.Create();
+        var second = store.Create();
+        for (var i = 2; i < OAuthStateStore.MaxStates; i++)
+            store.Create();
+        var newest = store.Create();
+
+        Assert.False(store.Consume(first));
+        Assert.True(store.Consume(second));
+        Assert.True(store.Consume(newest));
+    }
+
+    [Fact]
     public void UnknownState_IsRejected()
     {
         Assert.False(new OAuthStateStore(_time).Consume("nope"));

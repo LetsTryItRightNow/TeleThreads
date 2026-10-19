@@ -1,4 +1,6 @@
 using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Unicode;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -33,7 +35,7 @@ public static class ThreadsAuthEndpoints
                 return Page(StatusCodes.Status400BadRequest, "Доступ не выдан.", errorDescription);
 
             var loginAgain = Page(StatusCodes.Status400BadRequest,
-                "Ссылка устарела или уже использована. Откройте ссылку для подключения ещё раз:", LoginUrl(media.Value));
+                "Ссылка устарела или уже использована. Откройте ссылку для подключения ещё раз:", link: LoginUrl(media.Value));
             if (string.IsNullOrEmpty(code) || string.IsNullOrEmpty(state))
                 return loginAgain;
 
@@ -95,18 +97,30 @@ public static class ThreadsAuthEndpoints
         if (!SignedRequest.TryParse(form["signed_request"].ToString(), options.AppSecret, out var payload))
             return false;
 
-        store.Clear();
-        loggers.CreateLogger(typeof(ThreadsAuthEndpoints)).LogWarning(
-            "Threads account removed by Meta {Callback} callback for user {UserId}", callback, payload?["user_id"]);
+        // Meta still expects a normal response for other users; it just doesn't concern the connected account.
+        var userId = payload!["user_id"] is JsonValue value
+            ? value.GetValueKind() == JsonValueKind.Number ? value.ToJsonString() : value.ToString()
+            : null;
+        var logger = loggers.CreateLogger(typeof(ThreadsAuthEndpoints));
+        if (userId is not null && store.ClearIfUser(userId))
+            logger.LogWarning("Threads account removed by Meta {Callback} callback for user {UserId}", callback, userId);
+        else
+            logger.LogInformation(
+                "Meta {Callback} callback for user {UserId} does not match the connected account; nothing removed",
+                callback, userId);
         return true;
     }
 
     private static string LoginUrl(MediaOptions media) => $"{media.PublicBaseUrl.TrimEnd('/')}/threads/login";
 
-    // Every paragraph is HTML-encoded, so callers may pass values that came from the request.
-    private static IResult Page(int statusCode, params string?[] paragraphs)
+    // Every value is HTML-encoded, so callers may pass values that came from the request.
+    private static IResult Page(int statusCode, string message, string? detail = null, string? link = null)
     {
-        var body = string.Concat(paragraphs.Where(p => !string.IsNullOrEmpty(p)).Select(p => $"<p>{Html.Encode(p!)}</p>"));
+        var body = $"<p>{Html.Encode(message)}</p>";
+        if (!string.IsNullOrEmpty(detail))
+            body += $"<p>{Html.Encode(detail)}</p>";
+        if (!string.IsNullOrEmpty(link))
+            body += $"<p><a href=\"{Html.Encode(link)}\">{Html.Encode(link)}</a></p>";
         var html = $$"""
             <!doctype html>
             <html lang="ru">

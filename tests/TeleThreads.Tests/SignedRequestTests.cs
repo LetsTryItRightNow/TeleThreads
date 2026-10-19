@@ -26,10 +26,24 @@ public class SignedRequestTests
     }
 
     [Fact]
+    public void AlgorithmIsCaseInsensitive()
+    {
+        Assert.True(SignedRequest.TryParse(Sign("""{"algorithm":"hmac-sha256","user_id":"42"}"""), Secret, out _));
+    }
+
+    [Theory]
+    [InlineData("""{"user_id":"42"}""")]
+    [InlineData("""{"algorithm":"none","user_id":"42"}""")]
+    public void MissingOrOtherAlgorithm_IsRejected(string json)
+    {
+        Assert.False(SignedRequest.TryParse(Sign(json), Secret, out _));
+    }
+
+    [Fact]
     public void TamperedPayload_IsRejected()
     {
-        var signature = Sign("""{"user_id":"42"}""").Split('.')[0];
-        var other = Base64Url.EncodeToString(Encoding.UTF8.GetBytes("""{"user_id":"43"}"""));
+        var signature = Sign("""{"algorithm":"HMAC-SHA256","user_id":"42"}""").Split('.')[0];
+        var other = Base64Url.EncodeToString(Encoding.UTF8.GetBytes("""{"algorithm":"HMAC-SHA256","user_id":"43"}"""));
 
         Assert.False(SignedRequest.TryParse($"{signature}.{other}", Secret, out _));
     }
@@ -37,7 +51,7 @@ public class SignedRequestTests
     [Fact]
     public void WrongSecret_IsRejected()
     {
-        Assert.False(SignedRequest.TryParse(Sign("""{"user_id":"42"}""", "other"), Secret, out _));
+        Assert.False(SignedRequest.TryParse(Sign("""{"algorithm":"HMAC-SHA256","user_id":"42"}""", "other"), Secret, out _));
     }
 
     [Theory]

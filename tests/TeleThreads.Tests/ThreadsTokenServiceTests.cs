@@ -80,6 +80,24 @@ public sealed class ThreadsTokenServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReconnectDuringRefresh_KeepsNewAccount()
+    {
+        _store.Save(new ThreadsAccount("42", "owner", "initial"), _time.UtcNow);
+        _time.UtcNow = _time.UtcNow.AddDays(8);
+        var handler = new StubHttpHandler(_ =>
+        {
+            _store.Save(new ThreadsAccount("42", "owner", "reconnected"), _time.UtcNow);
+            return StubHttpHandler.Json("""{"access_token":"refreshed"}""");
+        });
+        var service = new ThreadsTokenService(new HttpClient(handler), _store,
+            Options.Create(new MediaOptions()), _time, NullLogger<ThreadsTokenService>.Instance);
+
+        await service.GetAccountAsync(CancellationToken.None);
+
+        Assert.Equal("reconnected", _store.Get()!.AccessToken);
+    }
+
+    [Fact]
     public void Clear_RemovesAccount()
     {
         _store.Save(new ThreadsAccount("42", "owner", "initial"), _time.UtcNow);

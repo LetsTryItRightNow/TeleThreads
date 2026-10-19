@@ -34,14 +34,14 @@ public sealed class ThreadsTokenService(
 
             var refreshed = JsonNode.Parse(body)?["access_token"]?.GetValue<string>()
                 ?? throw new InvalidOperationException("Threads token refresh returned no token");
-            store.UpdateToken(refreshed, now);
+            store.UpdateToken(account.AccessToken, refreshed, now);
             logger.LogInformation("Threads access token refreshed");
             return account with { AccessToken = refreshed };
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             // Don't retry on every publish: the current token is still valid for weeks.
-            store.UpdateToken(account.AccessToken, now);
+            store.UpdateToken(account.AccessToken, account.AccessToken, now);
             logger.LogWarning(ex, "Threads token refresh failed; using the current token");
             return account;
         }

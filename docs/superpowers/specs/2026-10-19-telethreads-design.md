@@ -142,7 +142,7 @@ API открытое, без авторизации: в нём только да
 | `Gemini__ApiKey` | ключ Gemini API |
 | `Gemini__Model` | модель (по умолчанию `gemini-3.5-flash` — стабильная, поддерживается минимум до 05.2027) |
 | `Threads__DryRun` | `true` по умолчанию |
-| `Threads__UserId` / `Threads__AccessToken` | нужны только при `DryRun=false` |
+| `Threads__AppId` / `Threads__AppSecret` | Threads app id/secret для OAuth; аккаунт подключается через `/threads/login` (см. `2026-10-20-threads-oauth-design.md`) |
 | `Media__PublicBaseUrl` | `https://telethreads.dergach.xyz` |
 | `Storage__DataPath` | `/data` |
 

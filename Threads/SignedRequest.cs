@@ -23,8 +23,14 @@ public static class SignedRequest
             if (!CryptographicOperations.FixedTimeEquals(signature, expected))
                 return false;
 
-            payload = JsonNode.Parse(Base64Url.DecodeFromChars(parts[1])) as JsonObject;
-            return payload is not null;
+            var json = JsonNode.Parse(Base64Url.DecodeFromChars(parts[1])) as JsonObject;
+            if (json?["algorithm"] is not JsonValue algorithm
+                || algorithm.GetValueKind() != JsonValueKind.String
+                || !string.Equals(algorithm.GetValue<string>(), "HMAC-SHA256", StringComparison.OrdinalIgnoreCase))
+                return false;
+
+            payload = json;
+            return true;
         }
         catch (Exception ex) when (ex is FormatException or JsonException)
         {
