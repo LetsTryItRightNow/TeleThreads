@@ -164,26 +164,47 @@ docker compose start
 
 ## 7. Включение реальной публикации в Threads (позже)
 
+Публикуем в аккаунт владельца без его пароля: он один раз открывает ссылку, входит в Threads
+и нажимает «Разрешить» — сервис сам получает токен и хранит его в БД.
+
+**Приложение Meta (делает разработчик)**
+
 1. [Meta for Developers](https://developers.facebook.com/apps/) → *Create app* → сценарий
    *Access the Threads API*. Разрешения: `threads_basic`, `threads_content_publish`.
-2. *App roles → Roles → Threads Testers* — добавьте свой аккаунт Threads и примите приглашение
-   в приложении Threads (Настройки → Аккаунт → Разрешения для сайтов → Приглашения).
-3. В панели приложения сгенерируйте токен пользователя (User Token Generator) — это короткий токен.
-4. Обменяйте его на долгоживущий (60 дней):
-   ```bash
-   curl "https://graph.threads.net/access_token?grant_type=th_exchange_token&client_secret=<APP_SECRET>&access_token=<SHORT_TOKEN>"
+2. *Use cases → Access the Threads API → Settings* — заполните адреса и сохраните:
+   - *Redirect Callback URLs*: `https://telethreads.dergach.xyz/threads/callback`
+   - *Uninstall Callback URL*: `https://telethreads.dergach.xyz/threads/uninstall`
+   - *Delete Callback URL*: `https://telethreads.dergach.xyz/threads/delete`
+3. *App roles → Roles → Threads Testers* — добавьте имя пользователя Threads владельца аккаунта.
+4. Владелец принимает приглашение в приложении Threads:
+   Настройки → Аккаунт → Разрешения для сайтов → Приглашения.
+
+**Сервер**
+
+5. В `.env` впишите идентификатор и секрет приложения. У приложения их две пары: общие
+   (*App settings → Basic*) и отдельные для Threads (в настройках сценария Threads API —
+   *Threads app ID* и *Threads app secret*). Нужны **Threads**-шные:
    ```
-5. Узнайте свой user id:
-   ```bash
-   curl "https://graph.threads.net/v1.0/me?fields=id,username&access_token=<LONG_TOKEN>"
+   Threads__AppId=<Threads app ID>
+   Threads__AppSecret=<Threads app secret>
    ```
-6. В `.env`: `Threads__UserId=<id>`, `Threads__AccessToken=<LONG_TOKEN>`, `Threads__DryRun=false`,
-   затем `docker compose up -d`.
+   `Threads__DryRun=true` пока не трогайте. Примените: `docker compose up -d`.
+
+**Подключение аккаунта**
+
+6. Отправьте владельцу ссылку <https://telethreads.dergach.xyz/threads/login>. Он входит в Threads,
+   нажимает «Разрешить» и видит «Готово! Аккаунт @… подключён».
+7. Проверьте <https://telethreads.dergach.xyz/threads/status> — должно быть `"connected": true`
+   и нужный `username`.
+8. Включите публикацию: в `.env` `Threads__DryRun=false`, затем `docker compose up -d`.
 
 Фото, сохранённые во время dry-run, автоматически не удаляются (удаляются только после
 реальной публикации). Если хочется почистить: `docker exec telethreads sh -c 'rm -rf /data/media/*'`
 перед включением реальной публикации.
 
+Владелец может в любой момент отозвать доступ в настройках Threads (Разрешения для сайтов) —
+Meta сообщит об этом сервису, и он забудет аккаунт.
+
 Сервис сам продлевает токен раз в 7 дней — но только когда публикует посты. Если в канале
-не будет постов дольше 60 дней, токен истечёт: выпустите новый и замените его в `.env`
-(сервис увидит, что токен в конфиге поменялся, и начнёт использовать новый).
+не будет постов дольше 60 дней, токен истечёт (посты начнут падать с ошибкой). Тогда просто
+отправьте владельцу ссылку `/threads/login` ещё раз. Повторный вход заменяет сохранённый аккаунт.
