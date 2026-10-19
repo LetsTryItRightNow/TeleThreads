@@ -53,4 +53,15 @@ public class MediaGroupAggregatorTests
         var second = Assert.Single(_aggregator.TakeCompleted(T0.AddSeconds(5)));
         Assert.Equal("b", second.MediaGroupId);
     }
+
+    [Fact]
+    public void CompletedAlbums_AreReturnedInMessageIdOrder()
+    {
+        _aggregator.Add(Message(20, "later", photo: "l1"), T0);
+        _aggregator.Add(Message(10, "earlier", photo: "e1"), T0);
+
+        var posts = _aggregator.TakeCompleted(T0.AddSeconds(3));
+
+        Assert.Equal(["earlier", "later"], posts.Select(p => p.MediaGroupId));
+    }
 }

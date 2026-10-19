@@ -51,6 +51,17 @@ public sealed class GeminiRewriterTests : IDisposable
     }
 
     [Fact]
+    public async Task RewriteAsync_IgnoresThoughtParts()
+    {
+        var handler = new StubHttpHandler(_ => StubHttpHandler.Json(
+            """{"candidates":[{"content":{"role":"model","parts":[{"text":"secret reasoning","thought":true},{"text":"final answer"}]}}]}"""));
+
+        var result = await Create(handler).RewriteAsync("text", CancellationToken.None);
+
+        Assert.Equal("final answer", result);
+    }
+
+    [Fact]
     public async Task RewriteAsync_ErrorStatus_Throws()
     {
         var handler = new StubHttpHandler(_ => StubHttpHandler.Json("""{"error":"bad"}""", HttpStatusCode.BadRequest));

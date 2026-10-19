@@ -25,7 +25,7 @@ public sealed class MediaGroupAggregator(TimeSpan quietPeriod)
         var completed = _groups.Where(g => now - g.Value.LastSeen >= quietPeriod).ToList();
         foreach (var (id, _) in completed)
             _groups.Remove(id);
-        return completed.Select(g => ToPost(g.Value.Messages)).ToList();
+        return completed.Select(g => ToPost(g.Value.Messages)).OrderBy(p => p.FirstMessageId).ToList();
     }
 
     private static IncomingPost ToPost(List<IncomingMessage> messages)

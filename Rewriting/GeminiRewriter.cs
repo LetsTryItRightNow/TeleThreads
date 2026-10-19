@@ -29,7 +29,10 @@ public sealed class GeminiRewriter(HttpClient http, IOptions<GeminiOptions> opti
             throw new HttpRequestException($"Gemini returned {(int)response.StatusCode}: {body}");
 
         var parts = JsonNode.Parse(body)?["candidates"]?[0]?["content"]?["parts"]?.AsArray();
-        var result = string.Concat(parts?.Select(p => p?["text"]?.GetValue<string>()) ?? Enumerable.Empty<string?>());
+        // Thought parts carry the model's reasoning and must never be published.
+        var result = string.Concat(
+            parts?.Where(p => p?["thought"]?.GetValue<bool>() != true).Select(p => p?["text"]?.GetValue<string>())
+            ?? Enumerable.Empty<string?>());
         if (string.IsNullOrWhiteSpace(result))
             throw new InvalidOperationException($"Gemini returned no text: {body}");
 

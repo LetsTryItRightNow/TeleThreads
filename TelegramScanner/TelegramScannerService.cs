@@ -90,6 +90,12 @@ public sealed class TelegramScannerService(
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(post.Text) && post.PhotoFileIds.Count == 0)
+            {
+                logger.LogInformation("Skipping post {MessageId}: no text and no photos", post.FirstMessageId);
+                return;
+            }
+
             if (repository.Exists(post.ChatId, post.FirstMessageId))
                 return;
 
