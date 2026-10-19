@@ -140,6 +140,9 @@ public sealed class PostRepository(IOptions<StorageOptions> options)
             "INSERT INTO settings (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
             ("$key", key), ("$value", value));
 
+    public void DeleteSetting(string key) =>
+        Execute("DELETE FROM settings WHERE key = $key", ("$key", key));
+
     private static string Format(DateTime value) =>
         value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
 

@@ -7,9 +7,10 @@ namespace TeleThreads.Tests;
 
 public class ThreadsPublisherTests
 {
-    private sealed class FakeTokens : IThreadsTokenProvider
+    private sealed class FakeAccount : IThreadsAccountProvider
     {
-        public Task<string> GetAccessTokenAsync(CancellationToken ct) => Task.FromResult("tok");
+        public Task<ThreadsAccount> GetAccountAsync(CancellationToken ct) =>
+            Task.FromResult(new ThreadsAccount("42", "owner", "tok"));
     }
 
     private int _containers;
@@ -23,10 +24,9 @@ public class ThreadsPublisherTests
         });
 
     private static ThreadsPublisher Create(StubHttpHandler handler) =>
-        new(new HttpClient(handler), new FakeTokens(), Options.Create(new ThreadsOptions
+        new(new HttpClient(handler), new FakeAccount(), Options.Create(new ThreadsOptions
         {
             DryRun = false,
-            UserId = "42",
             StatusPollInterval = TimeSpan.Zero,
             StatusPollAttempts = 3,
         }));

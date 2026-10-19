@@ -23,7 +23,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddSingleton<PostRepository>();
 builder.Services.AddHttpClient("telegram");
 builder.Services.AddHttpClient<IPostRewriter, GeminiRewriter>();
-builder.Services.AddHttpClient<IThreadsTokenProvider, ThreadsTokenService>();
+builder.Services.AddSingleton<ThreadsAccountStore>();
+builder.Services.AddHttpClient<IThreadsAccountProvider, ThreadsTokenService>();
 if (builder.Configuration.GetValue("Threads:DryRun", true))
     builder.Services.AddSingleton<IThreadsPublisher, DryRunThreadsPublisher>();
 else
