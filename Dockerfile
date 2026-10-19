@@ -11,6 +11,8 @@ RUN dotnet publish "./TeleThreads.csproj" -c $BUILD_CONFIGURATION -o /app/publis
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS final
 WORKDIR /app
 ENV ASPNETCORE_HTTP_PORTS=8080
+ENV Storage__DataPath=/data
+RUN mkdir -p /data && chown $APP_UID /data
 EXPOSE 8080
 USER $APP_UID
 COPY --from=build /app/publish .
