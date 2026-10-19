@@ -64,7 +64,7 @@ public sealed class TelegramScannerService(
         {
             // Also the easiest way to find out the channel id when setting the bot up.
             logger.LogInformation(
-                "Ignoring post from chat {ChatId} ({Title}); Telegram:ChannelId is {ChannelId}",
+                "Ignoring post from chat {ChatId} ({Title}); Telegram:ChannelId is '{ChannelId}'",
                 message.Chat.Id, message.Chat.Title, telegram.Value.ChannelId);
             return;
         }
