@@ -51,7 +51,7 @@ Program.cs  /health, /media/* (раздача фото), /api/posts
 | telegram_date | TEXT | дата поста в Telegram (UTC, ISO 8601) |
 | original_text | TEXT NULL | текст/подпись из Telegram |
 | image_count | INTEGER | количество фото |
-| image_files | TEXT | JSON-массив имён файлов в /data/media/{id}/ |
+| image_files | TEXT | JSON-массив путей фото относительно /data/media (`{chatId}_{firstMessageId}/{n}.jpg`) |
 | rewritten_text | TEXT NULL | текст от Gemini |
 | status | TEXT | см. ниже |
 | attempts | INTEGER | число попыток обработки |
@@ -59,7 +59,7 @@ Program.cs  /health, /media/* (раздача фото), /api/posts
 | threads_post_id | TEXT NULL | id поста в Threads (в dry-run — `dry-run`) |
 | received_at / rewritten_at / published_at / updated_at | TEXT NULL | время этапов (UTC) |
 
-Уникальный индекс по `(telegram_chat_id, media_group_id)` и по первому message id —
+Уникальный индекс по `(telegram_chat_id, telegram_first_message_id)` —
 защита от дублей.
 
 Таблица `settings` (key/value): текущий токен Threads и дата его обновления.
@@ -96,7 +96,7 @@ Program.cs  /health, /media/* (раздача фото), /api/posts
      с текстом (больше 20 — берутся первые 20);
    - ожидание статуса контейнера `FINISHED` (опрос, таймаут ~1 мин);
    - `threads_publish`.
-   URL фото: `{Media:PublicBaseUrl}/media/{postId}/{file}`.
+   URL фото: `{Media:PublicBaseUrl}/media/{image_file}`.
    В dry-run публикатор пишет в лог тип поста, текст и URL фото и возвращает `dry-run`.
    Статус — `Published`. Фото удаляются только после реальной публикации
    (в dry-run остаются, чтобы можно было проверить URL).
@@ -116,7 +116,7 @@ API открытое, без авторизации: в нём только да
   "telegramMessageIds": [345, 346, 347],
   "telegramDate": "2026-10-19T10:15:00Z",
   "imageCount": 3,
-  "imageUrls": ["https://telethreads.dergach.xyz/media/12/0.jpg", "..."],
+  "imageUrls": ["https://telethreads.dergach.xyz/media/-1001234567890_345/0.jpg", "..."],
   "originalText": "...",
   "rewrittenText": "...",
   "status": "Published",
@@ -140,7 +140,7 @@ API открытое, без авторизации: в нём только да
 | `Telegram__BotToken` | токен бота |
 | `Telegram__ChannelId` | id канала (например `-100...`) |
 | `Gemini__ApiKey` | ключ Gemini API |
-| `Gemini__Model` | модель (по умолчанию `gemini-2.5-flash`) |
+| `Gemini__Model` | модель (по умолчанию `gemini-3.5-flash` — стабильная, поддерживается минимум до 05.2027) |
 | `Threads__DryRun` | `true` по умолчанию |
 | `Threads__UserId` / `Threads__AccessToken` | нужны только при `DryRun=false` |
 | `Media__PublicBaseUrl` | `https://telethreads.dergach.xyz` |
