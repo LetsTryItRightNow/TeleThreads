@@ -105,6 +105,21 @@ public sealed class PostProcessorTests : IDisposable
     }
 
     [Fact]
+    public async Task MediaOutsideMediaRoot_IsNotDeleted_AndPostStaysPublished()
+    {
+        var outside = Path.Combine(_data.Storage.MediaRoot, "..", "outside");
+        Directory.CreateDirectory(outside);
+        File.WriteAllText(Path.Combine(outside, "0.jpg"), "x");
+        var id = Insert("text", "../outside/0.jpg");
+
+        await Create(dryRun: false).ProcessPendingAsync(CancellationToken.None);
+
+        Assert.True(Directory.Exists(outside));
+        Assert.Equal(PostStatus.Published, _data.Repository.Get(id)!.Status);
+        Assert.Single(_publisher.Published);
+    }
+
+    [Fact]
     public async Task RealPublish_DeletesMediaFolder_DryRunKeepsIt()
     {
         var folder = Path.Combine(_data.Storage.MediaRoot, "a");

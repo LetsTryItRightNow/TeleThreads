@@ -77,22 +77,36 @@ public sealed class PostProcessor(
         var threadsPost = new ThreadsPost(
             string.IsNullOrEmpty(post.RewrittenText) ? null : post.RewrittenText,
             post.ImageFiles.Select(media.Value.UrlFor).ToList());
+        // A crash between the Threads publish and MarkPublished can lead to a re-publish after restart (accepted for now).
         var threadsId = await publisher.PublishAsync(threadsPost, ct);
         repository.MarkPublished(post.Id, threadsId, Now);
         logger.LogInformation("Post {Id} published to Threads as {ThreadsId}", post.Id, threadsId);
 
         // In dry-run the photos stay, so their public URLs can be checked by hand.
         if (!threads.Value.DryRun)
-            DeleteMedia(post);
+        {
+            try
+            {
+                DeleteMedia(post);
+            }
+            catch (Exception ex)
+            {
+                // The post is already published; a cleanup failure must not change its status.
+                logger.LogWarning(ex, "Post {Id}: failed to delete media", post.Id);
+            }
+        }
     }
 
     private void DeleteMedia(PostRecord post)
     {
+        var root = Path.GetFullPath(storage.Value.MediaRoot).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
         foreach (var folder in post.ImageFiles.Select(Path.GetDirectoryName).Distinct())
         {
             if (string.IsNullOrEmpty(folder))
                 continue;
-            var path = Path.Combine(storage.Value.MediaRoot, folder);
+            var path = Path.GetFullPath(Path.Combine(storage.Value.MediaRoot, folder));
+            if (!path.StartsWith(root, StringComparison.OrdinalIgnoreCase))
+                continue;
             if (Directory.Exists(path))
                 Directory.Delete(path, recursive: true);
         }
