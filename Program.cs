@@ -24,7 +24,10 @@ builder.Services.AddSingleton<PostRepository>();
 builder.Services.AddHttpClient("telegram");
 builder.Services.AddHttpClient<IPostRewriter, GeminiRewriter>();
 builder.Services.AddSingleton<ThreadsAccountStore>();
+builder.Services.AddSingleton<OAuthStateStore>();
 builder.Services.AddHttpClient<IThreadsAccountProvider, ThreadsTokenService>();
+builder.Services.AddHttpClient<ThreadsAuthClient>();
+builder.Services.AddTransient<ThreadsConnector>();
 if (builder.Configuration.GetValue("Threads:DryRun", true))
     builder.Services.AddSingleton<IThreadsPublisher, DryRunThreadsPublisher>();
 else
@@ -40,6 +43,14 @@ repository.Initialize();
 repository.ResetInProgress(DateTime.UtcNow);
 Directory.CreateDirectory(storage.MediaRoot);
 
+if (!app.Services.GetRequiredService<IOptions<ThreadsOptions>>().Value.DryRun
+    && app.Services.GetRequiredService<ThreadsAccountStore>().Get() is null)
+{
+    var publicBaseUrl = app.Services.GetRequiredService<IOptions<MediaOptions>>().Value.PublicBaseUrl.TrimEnd('/');
+    app.Logger.LogWarning(
+        "Threads publishing is on but no account is connected: open {LoginUrl}", $"{publicBaseUrl}/threads/login");
+}
+
 app.MapGet("/health", () => Results.Text("ok"));
 
 // Threads downloads images by URL, so the photos taken from Telegram are served from here.
@@ -50,5 +61,6 @@ app.UseStaticFiles(new StaticFileOptions
 });
 
 app.MapPostsApi();
+app.MapThreadsAuth();
 
 app.Run();
