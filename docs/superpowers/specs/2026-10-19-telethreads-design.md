@@ -103,7 +103,7 @@ Program.cs  /health, /media/* (раздача фото), /api/posts
 
 ## GET-API
 
-Доступ по заголовку `X-Api-Key` (значение `Api:Key`; если не задано — API отключено).
+API открытое, без авторизации: в нём только данные, которые и так публичны.
 
 - `GET /api/posts?limit=50&status=Failed` — список постов, новые сверху.
 - `GET /api/posts/{id}` — один пост.
@@ -145,10 +145,19 @@ Program.cs  /health, /media/* (раздача фото), /api/posts
 | `Threads__UserId` / `Threads__AccessToken` | нужны только при `DryRun=false` |
 | `Media__PublicBaseUrl` | `https://telethreads.dergach.xyz` |
 | `Storage__DataPath` | `/data` |
-| `Api__Key` | ключ для GET-API |
 
 Секреты — в `.env` на сервере (не в git). docker-compose монтирует volume в `/data`.
 Reverse proxy на сервере направляет `telethreads.dergach.xyz` в контейнер.
+
+## Деплой
+
+Деплоит пользователь сам по пошаговой инструкции (`docs/deploy.md`):
+- echo-сервер на `echo.dergach.xyz` выключается, его контейнер удаляется;
+- новый контейнер `telethreads` публикуется на `telethreads.dergach.xyz`
+  (DNS уже настроен), прокси и сертификат переключаются на новый домен;
+- `.env` с секретами создаётся на сервере по шаблону `.env.example`.
+
+Echo-эндпоинты (`/echo`) из `Program.cs` удаляются, `/health` остаётся.
 
 ## Ошибки и логирование
 
