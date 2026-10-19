@@ -12,3 +12,4 @@ services:
 
 volumes:
   telethreads-data:
+    name: telethreads-data

@@ -115,7 +115,7 @@ curl https://telethreads.dergach.xyz/health   # ok
 1. Опубликуйте в канале любой пост.
 2. В логах появится строка вида:
    ```
-   Ignoring post from chat -1001234567890 (Название канала); Telegram:ChannelId is ''
+   Ignoring post from chat -1001234567890 (Название канала); Telegram:ChannelId is '(null)'
    ```
    ```bash
    docker compose logs | grep "Ignoring post"
@@ -134,7 +134,7 @@ curl https://telethreads.dergach.xyz/health   # ok
 ```
 Saved post 1 from Telegram with 3 image(s)
 Post 1 rewritten: 412 chars
-[dry-run] Would publish CAROUSEL to Threads: ...
+[dry-run] Would publish to Threads as CAROUSEL: ... with 3 image(s): ...
 Post 1 published to Threads as dry-run
 ```
 
@@ -150,14 +150,16 @@ Post 1 published to Threads as dry-run
 docker compose logs -f --tail 100        # логи
 docker compose restart                   # перезапуск
 docker compose up -d --build             # после git pull
-docker volume ls                         # том с БД и фото: <каталог>_telethreads-data
+docker volume ls                         # том с БД и фото: telethreads-data
 ```
 
 Резервная копия БД и фото:
 
 ```bash
-docker run --rm -v <каталог>_telethreads-data:/data -v "$PWD":/backup alpine \
+docker compose stop    # чтобы не скопировать БД посреди записи
+docker run --rm -v telethreads-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/telethreads-data.tgz -C /data .
+docker compose start
 ```
 
 ## 7. Включение реальной публикации в Threads (позже)
@@ -177,6 +179,10 @@ docker run --rm -v <каталог>_telethreads-data:/data -v "$PWD":/backup alp
    ```
 6. В `.env`: `Threads__UserId=<id>`, `Threads__AccessToken=<LONG_TOKEN>`, `Threads__DryRun=false`,
    затем `docker compose up -d`.
+
+Фото, сохранённые во время dry-run, автоматически не удаляются (удаляются только после
+реальной публикации). Если хочется почистить: `docker exec telethreads sh -c 'rm -rf /data/media/*'`
+перед включением реальной публикации.
 
 Сервис сам продлевает токен раз в 7 дней — но только когда публикует посты. Если в канале
 не будет постов дольше 60 дней, токен истечёт: выпустите новый и замените его в `.env`

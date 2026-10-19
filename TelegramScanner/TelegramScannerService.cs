@@ -89,7 +89,9 @@ public sealed class TelegramScannerService(
 
     private async Task SaveAsync(ITelegramBotClient bot, IncomingPost post, CancellationToken ct)
     {
-        var folderPath = Path.Combine(storage.Value.MediaRoot, $"{post.ChatId}_{post.FirstMessageId}");
+        var folder = $"{post.ChatId}_{post.FirstMessageId}";
+        var folderPath = Path.Combine(storage.Value.MediaRoot, folder);
+        var createdFolder = false;
         try
         {
             if (string.IsNullOrWhiteSpace(post.Text) && post.PhotoFileIds.Count == 0)
@@ -101,8 +103,8 @@ public sealed class TelegramScannerService(
             if (repository.Exists(post.ChatId, post.FirstMessageId))
                 return;
 
-            var folder = $"{post.ChatId}_{post.FirstMessageId}";
-            Directory.CreateDirectory(Path.Combine(storage.Value.MediaRoot, folder));
+            Directory.CreateDirectory(folderPath);
+            createdFolder = true;
             var files = new List<string>();
             for (var i = 0; i < post.PhotoFileIds.Count; i++)
             {
@@ -118,7 +120,8 @@ public sealed class TelegramScannerService(
         {
             try
             {
-                if (Directory.Exists(folderPath))
+                // Only remove a folder this call created: on a redelivered update it may belong to a saved post.
+                if (createdFolder && Directory.Exists(folderPath))
                     Directory.Delete(folderPath, recursive: true);
             }
             catch (Exception cleanupEx)
