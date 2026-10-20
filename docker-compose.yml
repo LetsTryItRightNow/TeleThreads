@@ -5,11 +5,35 @@ services:
     container_name: telethreads
     restart: unless-stopped
     env_file: .env
+    environment:
+      Mongo__ConnectionString: mongodb://${MONGO_USER}:${MONGO_PASSWORD}@mongo:27017/?authSource=admin
     ports:
       - "127.0.0.1:8088:8080"
     volumes:
       - telethreads-data:/data
+    depends_on:
+      mongo:
+        condition: service_healthy
+
+  mongo:
+    image: mongo:8.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - telethreads-mongo:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   telethreads-data:
     name: telethreads-data
+  telethreads-mongo:
+    name: telethreads-mongo
