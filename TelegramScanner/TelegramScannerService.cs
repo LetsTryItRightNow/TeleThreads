@@ -39,12 +39,13 @@ public sealed class TelegramScannerService(
                 var updates = await bot.GetUpdates(
                     offset,
                     timeout: _aggregator.HasPending ? 1 : 25,
-                    allowedUpdates: [UpdateType.ChannelPost],
+                    // The source can be a channel (channel_post) or a group where only admins post (message).
+                    allowedUpdates: [UpdateType.ChannelPost, UpdateType.Message],
                     cancellationToken: stoppingToken);
                 foreach (var update in updates)
                 {
                     offset = update.Id + 1;
-                    if (update.ChannelPost is { } message)
+                    if ((update.ChannelPost ?? update.Message) is { } message)
                         await HandleAsync(bot, message, stoppingToken);
                 }
                 foreach (var post in _aggregator.TakeCompleted(Now))
