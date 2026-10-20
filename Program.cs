@@ -16,6 +16,7 @@ builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection("Gemi
 builder.Services.Configure<ThreadsOptions>(builder.Configuration.GetSection("Threads"));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
 builder.Services.Configure<MediaOptions>(builder.Configuration.GetSection("Media"));
+builder.Services.Configure<TestingOptions>(builder.Configuration.GetSection("Testing"));
 // Keep Cyrillic readable in API responses instead of \uXXXX escapes.
 builder.Services.ConfigureHttpJsonOptions(o => o.SerializerOptions.Encoder = JavaScriptEncoder.Create(UnicodeRanges.All));
 
@@ -62,5 +63,6 @@ app.UseStaticFiles(new StaticFileOptions
 
 app.MapPostsApi();
 app.MapThreadsAuth();
+app.MapTestApi();
 
 app.Run();

@@ -152,6 +152,38 @@ Post 1 published to Threads as dry-run
 
 Если пост в статусе `Failed` — причина в поле `lastError`.
 
+## Тестовый пост без Telegram
+
+Чтобы проверить Gemini и весь путь поста без публикации в Telegram, задайте в `.env`
+секретный ключ (любая длинная случайная строка, например из `openssl rand -hex 16`):
+
+```
+Testing__Key=<ключ>
+```
+
+и выполните `docker compose up -d`. Затем на сервере создайте файл `post.json` (UTF-8):
+
+```json
+{
+  "text": "Текст поста, как он был бы в Telegram",
+  "imageUrls": ["https://example.com/photo1.jpg", "https://example.com/photo2.jpg"]
+}
+```
+
+`imageUrls` можно не указывать. Отправьте:
+
+```bash
+curl -X POST http://127.0.0.1:8088/api/test/posts \
+  -H "X-Test-Key: <ключ>" -H "Content-Type: application/json" \
+  --data-binary @post.json
+```
+
+Ответ — `{"id":5,...}`. Через несколько секунд на `/api/posts/5` появится `rewrittenText`
+от Gemini, а в логах — строка `[dry-run] Would publish ...`.
+
+Тестовый пост идёт по тому же пути, что и настоящий: при `Threads__DryRun=false` он
+**будет опубликован в Threads**. Без ключа (`Testing__Key` пустой) эндпоинт отвечает 404.
+
 ## Полезные команды
 
 ```bash
