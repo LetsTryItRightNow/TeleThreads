@@ -286,6 +286,7 @@ docker run --rm -v telethreads-data:/data -v "$PWD":/backup alpine \
 `mongodump` работает на ходу, останавливать сервис не нужно. Восстановление базы из копии:
 
 ```bash
+export $(grep '^MONGO_' .env)
 docker compose exec -T mongo mongorestore -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
   --authenticationDatabase admin --drop --archive < telethreads-mongo.archive
 ```
