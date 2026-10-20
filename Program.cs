@@ -15,6 +15,7 @@ builder.Services.Configure<TelegramOptions>(builder.Configuration.GetSection("Te
 builder.Services.Configure<GeminiOptions>(builder.Configuration.GetSection("Gemini"));
 builder.Services.Configure<ThreadsOptions>(builder.Configuration.GetSection("Threads"));
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection("Storage"));
+builder.Services.Configure<MongoOptions>(builder.Configuration.GetSection("Mongo"));
 builder.Services.Configure<MediaOptions>(builder.Configuration.GetSection("Media"));
 builder.Services.Configure<TestingOptions>(builder.Configuration.GetSection("Testing"));
 // Keep Cyrillic readable in API responses instead of \uXXXX escapes.

@@ -1,3 +1,4 @@
+using MongoDB.Driver;
 using TeleThreads.Storage;
 using TeleThreads.TelegramScanner;
 
@@ -124,5 +125,44 @@ public sealed class PostRepositoryTests : IDisposable
         Repo.SetSetting("k", "1");
         Repo.SetSetting("k", "2");
         Assert.Equal("2", Repo.GetSetting("k"));
+    }
+
+    [Fact]
+    public void Settings_CanBeDeleted()
+    {
+        Repo.SetSetting("k", "1");
+        Repo.DeleteSetting("k");
+        Assert.Null(Repo.GetSetting("k"));
+    }
+
+    [Fact]
+    public void Insert_AssignsIncreasingIds()
+    {
+        var a = Repo.Insert(Post(10), [], Now);
+        var b = Repo.Insert(Post(20), [], Now);
+        var c = Repo.Insert(Post(30), [], Now);
+
+        Assert.True(a > 0);
+        Assert.True(b > a);
+        Assert.True(c > b);
+    }
+
+    [Fact]
+    public void Insert_RejectsDuplicateTelegramPost()
+    {
+        Repo.Insert(Post(10), [], Now);
+
+        Assert.Throws<MongoWriteException>(() => Repo.Insert(Post(10), [], Now));
+        Assert.Single(Repo.List(50, null));
+    }
+
+    [Fact]
+    public void Initialize_IsIdempotent()
+    {
+        var id = Repo.Insert(Post(10), [], Now);
+
+        Repo.Initialize();
+
+        Assert.NotNull(Repo.Get(id));
     }
 }

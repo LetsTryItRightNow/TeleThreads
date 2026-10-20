@@ -1,220 +1,207 @@
-using System.Globalization;
-using System.Text.Json;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Options;
+using MongoDB.Bson;
+using MongoDB.Bson.Serialization.Conventions;
+using MongoDB.Driver;
 using TeleThreads.TelegramScanner;
 
 namespace TeleThreads.Storage;
 
-// Posts table doubles as the work queue: each pipeline stage claims posts by status.
-public sealed class PostRepository(IOptions<StorageOptions> options)
+// Posts collection doubles as the work queue: each pipeline stage claims posts by status.
+public sealed class PostRepository
 {
-    private readonly string _databasePath = options.Value.DatabasePath;
+    private readonly IMongoCollection<PostDocument> _posts;
+    private readonly IMongoCollection<CounterDocument> _counters;
+    private readonly IMongoCollection<SettingDocument> _settings;
 
-    public void Initialize()
+    static PostRepository() =>
+        ConventionRegistry.Register(
+            "TeleThreads storage",
+            new ConventionPack { new CamelCaseElementNameConvention() },
+            type => type.DeclaringType == typeof(PostRepository));
+
+    public PostRepository(IOptions<MongoOptions> options)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_databasePath))!);
-        Execute("""
-            CREATE TABLE IF NOT EXISTS posts (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                telegram_chat_id INTEGER NOT NULL,
-                telegram_first_message_id INTEGER NOT NULL,
-                telegram_message_ids TEXT NOT NULL,
-                media_group_id TEXT,
-                telegram_date TEXT NOT NULL,
-                original_text TEXT,
-                image_count INTEGER NOT NULL,
-                image_files TEXT NOT NULL,
-                rewritten_text TEXT,
-                status TEXT NOT NULL,
-                attempts INTEGER NOT NULL DEFAULT 0,
-                last_error TEXT,
-                next_attempt_at TEXT,
-                threads_post_id TEXT,
-                received_at TEXT NOT NULL,
-                rewritten_at TEXT,
-                published_at TEXT,
-                updated_at TEXT NOT NULL,
-                UNIQUE (telegram_chat_id, telegram_first_message_id)
-            );
-            CREATE INDEX IF NOT EXISTS ix_posts_status ON posts (status);
-            CREATE TABLE IF NOT EXISTS settings (
-                key TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            );
-            """);
+        var database = new MongoClient(options.Value.ConnectionString).GetDatabase(options.Value.Database);
+        _posts = database.GetCollection<PostDocument>("posts");
+        _counters = database.GetCollection<CounterDocument>("counters");
+        _settings = database.GetCollection<SettingDocument>("settings");
     }
 
-    public bool Exists(long chatId, int firstMessageId) =>
-        Scalar<long>(
-            "SELECT COUNT(*) FROM posts WHERE telegram_chat_id = $chat AND telegram_first_message_id = $first",
-            ("$chat", chatId), ("$first", firstMessageId)) > 0;
+    private static FilterDefinitionBuilder<PostDocument> Filter => Builders<PostDocument>.Filter;
+    private static UpdateDefinitionBuilder<PostDocument> Update => Builders<PostDocument>.Update;
 
-    public long Insert(IncomingPost post, IReadOnlyList<string> imageFiles, DateTime now) =>
-        Scalar<long>("""
-            INSERT INTO posts (telegram_chat_id, telegram_first_message_id, telegram_message_ids, media_group_id,
-                telegram_date, original_text, image_count, image_files, status, received_at, updated_at)
-            VALUES ($chat, $first, $ids, $group, $date, $text, $count, $files, $status, $now, $now)
-            RETURNING id
-            """,
-            ("$chat", post.ChatId),
-            ("$first", post.FirstMessageId),
-            ("$ids", JsonSerializer.Serialize(post.MessageIds)),
-            ("$group", post.MediaGroupId),
-            ("$date", Format(post.Date)),
-            ("$text", post.Text),
-            ("$count", imageFiles.Count),
-            ("$files", JsonSerializer.Serialize(imageFiles)),
-            ("$status", PostStatus.Received),
-            ("$now", Format(now)));
+    public void Initialize() =>
+        _posts.Indexes.CreateMany([
+            new CreateIndexModel<PostDocument>(
+                Builders<PostDocument>.IndexKeys.Ascending(p => p.TelegramChatId).Ascending(p => p.TelegramFirstMessageId),
+                new CreateIndexOptions { Unique = true }),
+            new CreateIndexModel<PostDocument>(
+                Builders<PostDocument>.IndexKeys.Ascending(p => p.Status).Ascending(p => p.NextAttemptAt).Ascending(p => p.Id)),
+        ]);
+
+    public bool Exists(long chatId, int firstMessageId) =>
+        _posts.Find(p => p.TelegramChatId == chatId && p.TelegramFirstMessageId == firstMessageId).Any();
+
+    public long Insert(IncomingPost post, IReadOnlyList<string> imageFiles, DateTime now)
+    {
+        var id = NextPostId();
+        _posts.InsertOne(new PostDocument
+        {
+            Id = id,
+            TelegramChatId = post.ChatId,
+            TelegramFirstMessageId = post.FirstMessageId,
+            TelegramMessageIds = [.. post.MessageIds],
+            MediaGroupId = post.MediaGroupId,
+            TelegramDate = post.Date,
+            OriginalText = post.Text,
+            ImageFiles = [.. imageFiles],
+            Status = PostStatus.Received,
+            ReceivedAt = now,
+            UpdatedAt = now,
+        });
+        return id;
+    }
 
     public PostRecord? Get(long id) =>
-        Query("SELECT * FROM posts WHERE id = $id", ("$id", id)).SingleOrDefault();
+        _posts.Find(p => p.Id == id).SingleOrDefault()?.ToRecord();
 
     public IReadOnlyList<PostRecord> List(int limit, string? status) =>
-        Query(
-            "SELECT * FROM posts WHERE $status IS NULL OR status = $status ORDER BY id DESC LIMIT $limit",
-            ("$status", status), ("$limit", limit));
+        _posts.Find(status is null ? Filter.Empty : Filter.Eq(p => p.Status, status))
+            .SortByDescending(p => p.Id)
+            .Limit(limit)
+            .ToList()
+            .ConvertAll(p => p.ToRecord());
 
     // Atomically moves the oldest due post from fromStatus to the in-progress toStatus.
     public PostRecord? ClaimNext(string fromStatus, string toStatus, DateTime now) =>
-        Query("""
-            UPDATE posts SET status = $to, updated_at = $now
-            WHERE id = (
-                SELECT id FROM posts
-                WHERE status = $from AND (next_attempt_at IS NULL OR next_attempt_at <= $now)
-                ORDER BY id LIMIT 1)
-            RETURNING *
-            """,
-            ("$from", fromStatus), ("$to", toStatus), ("$now", Format(now))).SingleOrDefault();
+        _posts.FindOneAndUpdate(
+            Filter.Eq(p => p.Status, fromStatus)
+                & (Filter.Eq(p => p.NextAttemptAt, null) | Filter.Lte(p => p.NextAttemptAt, now)),
+            Update.Set(p => p.Status, toStatus).Set(p => p.UpdatedAt, now),
+            new FindOneAndUpdateOptions<PostDocument>
+            {
+                Sort = Builders<PostDocument>.Sort.Ascending(p => p.Id),
+                ReturnDocument = ReturnDocument.After,
+            })?.ToRecord();
 
     public void MarkRewritten(long id, string text, DateTime now) =>
-        Execute("""
-            UPDATE posts SET status = $status, rewritten_text = $text, rewritten_at = $now,
-                attempts = 0, last_error = NULL, next_attempt_at = NULL, updated_at = $now
-            WHERE id = $id
-            """,
-            ("$id", id), ("$status", PostStatus.Rewritten), ("$text", text), ("$now", Format(now)));
+        _posts.UpdateOne(
+            p => p.Id == id,
+            Update.Set(p => p.Status, PostStatus.Rewritten)
+                .Set(p => p.RewrittenText, text)
+                .Set(p => p.RewrittenAt, now)
+                .Set(p => p.Attempts, 0)
+                .Set(p => p.LastError, null)
+                .Set(p => p.NextAttemptAt, null)
+                .Set(p => p.UpdatedAt, now));
 
     public void MarkPublished(long id, string threadsPostId, DateTime now) =>
-        Execute("""
-            UPDATE posts SET status = $status, threads_post_id = $threadsId, published_at = $now,
-                attempts = 0, last_error = NULL, next_attempt_at = NULL, updated_at = $now
-            WHERE id = $id
-            """,
-            ("$id", id), ("$status", PostStatus.Published), ("$threadsId", threadsPostId), ("$now", Format(now)));
+        _posts.UpdateOne(
+            p => p.Id == id,
+            Update.Set(p => p.Status, PostStatus.Published)
+                .Set(p => p.ThreadsPostId, threadsPostId)
+                .Set(p => p.PublishedAt, now)
+                .Set(p => p.Attempts, 0)
+                .Set(p => p.LastError, null)
+                .Set(p => p.NextAttemptAt, null)
+                .Set(p => p.UpdatedAt, now));
 
     // Returns the status the post ended up in: retryStatus, or Failed once maxAttempts is reached.
-    public string RecordFailure(long id, string retryStatus, string error, DateTime now, int maxAttempts, TimeSpan retryDelay) =>
-        Scalar<string>("""
-            UPDATE posts SET
-                attempts = attempts + 1,
-                status = CASE WHEN attempts + 1 >= $max THEN $failed ELSE $retry END,
-                last_error = $error,
-                next_attempt_at = $next,
-                updated_at = $now
-            WHERE id = $id
-            RETURNING status
-            """,
-            ("$id", id), ("$max", maxAttempts), ("$failed", PostStatus.Failed), ("$retry", retryStatus),
-            ("$error", error), ("$next", Format(now + retryDelay)), ("$now", Format(now)));
+    public string RecordFailure(long id, string retryStatus, string error, DateTime now, int maxAttempts, TimeSpan retryDelay)
+    {
+        // Within one $set stage "$attempts" still refers to the value before this update.
+        var attempts = new BsonDocument("$add", new BsonArray { "$attempts", 1 });
+        var set = new BsonDocument
+        {
+            { "attempts", attempts },
+            {
+                "status", new BsonDocument("$cond", new BsonArray
+                {
+                    new BsonDocument("$gte", new BsonArray { attempts, maxAttempts }),
+                    Literal(PostStatus.Failed),
+                    Literal(retryStatus),
+                })
+            },
+            { "lastError", Literal(error) },
+            { "nextAttemptAt", new BsonDateTime(now + retryDelay) },
+            { "updatedAt", new BsonDateTime(now) },
+        };
+        var updated = _posts.FindOneAndUpdate(
+            Filter.Eq(p => p.Id, id),
+            Update.Pipeline(new BsonDocument[] { new("$set", set) }),
+            new FindOneAndUpdateOptions<PostDocument> { ReturnDocument = ReturnDocument.After });
+        return updated?.Status!;
+    }
 
     // Posts interrupted mid-stage by a restart go back to the stage's input status.
-    public void ResetInProgress(DateTime now) =>
-        Execute("""
-            UPDATE posts SET status = CASE status WHEN $rewriting THEN $received ELSE $rewritten END, updated_at = $now
-            WHERE status IN ($rewriting, $publishing)
-            """,
-            ("$rewriting", PostStatus.Rewriting), ("$publishing", PostStatus.Publishing),
-            ("$received", PostStatus.Received), ("$rewritten", PostStatus.Rewritten), ("$now", Format(now)));
-
-    public string? GetSetting(string key)
+    public void ResetInProgress(DateTime now)
     {
-        using var connection = Open();
-        using var command = Command(connection, "SELECT value FROM settings WHERE key = $key", [("$key", key)]);
-        return command.ExecuteScalar() as string;
+        _posts.UpdateMany(
+            p => p.Status == PostStatus.Rewriting,
+            Update.Set(p => p.Status, PostStatus.Received).Set(p => p.UpdatedAt, now));
+        _posts.UpdateMany(
+            p => p.Status == PostStatus.Publishing,
+            Update.Set(p => p.Status, PostStatus.Rewritten).Set(p => p.UpdatedAt, now));
     }
+
+    public string? GetSetting(string key) =>
+        _settings.Find(s => s.Id == key).SingleOrDefault()?.Value;
 
     public void SetSetting(string key, string value) =>
-        Execute(
-            "INSERT INTO settings (key, value) VALUES ($key, $value) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
-            ("$key", key), ("$value", value));
+        _settings.ReplaceOne(
+            s => s.Id == key,
+            new SettingDocument { Id = key, Value = value },
+            new ReplaceOptions { IsUpsert = true });
 
     public void DeleteSetting(string key) =>
-        Execute("DELETE FROM settings WHERE key = $key", ("$key", key));
+        _settings.DeleteOne(s => s.Id == key);
 
-    private static string Format(DateTime value) =>
-        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    private long NextPostId() =>
+        _counters.FindOneAndUpdate(
+            Builders<CounterDocument>.Filter.Eq(c => c.Id, "posts"),
+            Builders<CounterDocument>.Update.Inc(c => c.Seq, 1L),
+            new FindOneAndUpdateOptions<CounterDocument> { IsUpsert = true, ReturnDocument = ReturnDocument.After })
+            .Seq;
 
-    private static DateTime ParseDate(string value) =>
-        DateTime.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+    // In a pipeline a string starting with '$' would be read as a field path.
+    private static BsonDocument Literal(string value) => new("$literal", value);
 
-    private SqliteConnection Open()
+    // DateTime fields use the driver default: stored as BSON Date (UTC), read back with DateTimeKind.Utc.
+    private sealed class PostDocument
     {
-        var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = _databasePath }.ToString());
-        connection.Open();
-        return connection;
+        public long Id { get; set; }
+        public long TelegramChatId { get; set; }
+        public int TelegramFirstMessageId { get; set; }
+        public List<int> TelegramMessageIds { get; set; } = [];
+        public string? MediaGroupId { get; set; }
+        public DateTime TelegramDate { get; set; }
+        public string? OriginalText { get; set; }
+        public List<string> ImageFiles { get; set; } = [];
+        public string? RewrittenText { get; set; }
+        public string Status { get; set; } = "";
+        public int Attempts { get; set; }
+        public string? LastError { get; set; }
+        public DateTime? NextAttemptAt { get; set; }
+        public string? ThreadsPostId { get; set; }
+        public DateTime ReceivedAt { get; set; }
+        public DateTime? RewrittenAt { get; set; }
+        public DateTime? PublishedAt { get; set; }
+        public DateTime UpdatedAt { get; set; }
+
+        public PostRecord ToRecord() => new(
+            Id, TelegramChatId, TelegramMessageIds, MediaGroupId, TelegramDate, OriginalText, ImageFiles,
+            RewrittenText, Status, Attempts, LastError, ThreadsPostId, ReceivedAt, RewrittenAt, PublishedAt, UpdatedAt);
     }
 
-    private static SqliteCommand Command(SqliteConnection connection, string sql, (string Name, object? Value)[] parameters)
+    private sealed class CounterDocument
     {
-        var command = connection.CreateCommand();
-        command.CommandText = sql;
-        foreach (var (name, value) in parameters)
-            command.Parameters.AddWithValue(name, value ?? DBNull.Value);
-        return command;
+        public string Id { get; set; } = "";
+        public long Seq { get; set; }
     }
 
-    private void Execute(string sql, params (string, object?)[] parameters)
+    private sealed class SettingDocument
     {
-        using var connection = Open();
-        using var command = Command(connection, sql, parameters);
-        command.ExecuteNonQuery();
-    }
-
-    private T Scalar<T>(string sql, params (string, object?)[] parameters)
-    {
-        using var connection = Open();
-        using var command = Command(connection, sql, parameters);
-        return (T)Convert.ChangeType(command.ExecuteScalar()!, typeof(T), CultureInfo.InvariantCulture);
-    }
-
-    private List<PostRecord> Query(string sql, params (string, object?)[] parameters)
-    {
-        using var connection = Open();
-        using var command = Command(connection, sql, parameters);
-        using var reader = command.ExecuteReader();
-        var result = new List<PostRecord>();
-        while (reader.Read())
-            result.Add(Read(reader));
-        return result;
-    }
-
-    private static PostRecord Read(SqliteDataReader reader)
-    {
-        string? Text(string column)
-        {
-            var i = reader.GetOrdinal(column);
-            return reader.IsDBNull(i) ? null : reader.GetString(i);
-        }
-        DateTime? Date(string column) => Text(column) is { } value ? ParseDate(value) : null;
-
-        return new PostRecord(
-            Id: reader.GetInt64(reader.GetOrdinal("id")),
-            TelegramChatId: reader.GetInt64(reader.GetOrdinal("telegram_chat_id")),
-            TelegramMessageIds: JsonSerializer.Deserialize<List<int>>(Text("telegram_message_ids")!)!,
-            MediaGroupId: Text("media_group_id"),
-            TelegramDate: Date("telegram_date")!.Value,
-            OriginalText: Text("original_text"),
-            ImageFiles: JsonSerializer.Deserialize<List<string>>(Text("image_files")!)!,
-            RewrittenText: Text("rewritten_text"),
-            Status: Text("status")!,
-            Attempts: reader.GetInt32(reader.GetOrdinal("attempts")),
-            LastError: Text("last_error"),
-            ThreadsPostId: Text("threads_post_id"),
-            ReceivedAt: Date("received_at")!.Value,
-            RewrittenAt: Date("rewritten_at"),
-            PublishedAt: Date("published_at"),
-            UpdatedAt: Date("updated_at")!.Value);
+        public string Id { get; set; } = "";
+        public string Value { get; set; } = "";
     }
 }
