@@ -7,6 +7,10 @@
 Публикация в Threads пока в режиме **dry-run**: сервис всё обрабатывает и пишет в лог,
 что отправил бы, но в Threads ничего не уходит.
 
+Посты и аккаунт Threads хранятся в MongoDB — это отдельный контейнер `mongo` в том же
+`docker-compose.yml`, данные лежат в томе `telethreads-mongo`. Фото — в томе `telethreads-data`.
+Если сервис уже установлен в версии с SQLite — см. раздел «Переход на MongoDB» ниже.
+
 ## 0. Что подготовить заранее
 
 **Telegram-бот**
@@ -56,11 +60,26 @@ chmod 600 .env
 Заполните `Telegram__BotToken` и `Gemini__ApiKey`. `Telegram__ChannelId` пока оставьте пустым —
 узнаем его на шаге 5. `Threads__*` не трогайте, `Threads__DryRun=true`.
 
+Задайте пользователя и пароль MongoDB (`MONGO_USER` можно оставить `telethreads`).
+Пароль сгенерируйте так — в нём будут только буквы и цифры, экранировать ничего не придётся:
+
+```bash
+openssl rand -hex 16
+```
+
+```
+MONGO_USER=telethreads
+MONGO_PASSWORD=<результат openssl>
+```
+
+Пользователь создаётся при **первом** запуске контейнера `mongo` (пока том `telethreads-mongo`
+пустой). Если потом поменять пароль в `.env`, в самой базе он не поменяется.
+
 ## 3. Пересобрать и запустить контейнер
 
 ```bash
 docker compose up -d --build
-docker compose ps          # STATUS должен быть Up
+docker compose ps          # telethreads — Up, mongo — Up (healthy)
 docker compose logs -f     # Ctrl+C — выйти из просмотра логов
 docker image prune -f      # удалить старый образ echo
 ```
@@ -190,16 +209,85 @@ curl -X POST http://127.0.0.1:8088/api/test/posts \
 docker compose logs -f --tail 100        # логи
 docker compose restart                   # перезапуск
 docker compose up -d --build             # после git pull
-docker volume ls                         # том с БД и фото: telethreads-data
+docker volume ls                         # тома: telethreads-mongo (БД) и telethreads-data (фото)
 ```
 
-Резервная копия БД и фото:
+## Переход на MongoDB (если сервис уже работал с SQLite)
+
+Данные из SQLite **не переносятся** (там были только тестовые посты): после обновления
+список постов начнётся заново с id 1, а аккаунт Threads, если он был подключён,
+нужно будет подключить ещё раз через `/threads/login`.
+
+1. До обновления добавьте в `.env` пользователя и пароль MongoDB (см. шаг 2):
+   ```bash
+   echo "MONGO_USER=telethreads" >> .env
+   echo "MONGO_PASSWORD=$(openssl rand -hex 16)" >> .env
+   ```
+2. Заберите код и пересоберите — compose поднимет и контейнер `mongo`:
+   ```bash
+   git pull
+   docker compose up -d --build
+   docker compose ps          # telethreads — Up, mongo — Up (healthy)
+   curl http://127.0.0.1:8088/api/posts   # []
+   ```
+3. Старый файл SQLite больше не нужен, его можно удалить:
+   ```bash
+   docker exec telethreads sh -c 'rm -f /data/telethreads.db*'
+   ```
+
+## База данных (MongoDB)
+
+Порт MongoDB открыт только на самом сервере (`127.0.0.1:27017`), снаружи он недоступен.
+
+**MongoDB Compass со своего компьютера** — через SSH-туннель:
 
 ```bash
-docker compose stop    # чтобы не скопировать БД посреди записи
+ssh -L 27017:127.0.0.1:27017 <ваш-сервер>
+```
+
+Пока это соединение открыто, в Compass подключитесь по строке:
+
+```
+mongodb://<MONGO_USER>:<MONGO_PASSWORD>@localhost:27017/?authSource=admin
+```
+
+База — `telethreads`, коллекции: `posts` (посты), `counters` (счётчик id постов),
+`settings` (аккаунт и токен Threads). Если на вашем компьютере порт 27017 уже занят
+(например, локальной MongoDB), пробросьте другой: `ssh -L 27018:127.0.0.1:27017 <ваш-сервер>`
+и в строке подключения укажите `localhost:27018`.
+
+**mongosh на сервере** (из каталога проекта):
+
+```bash
+export $(grep '^MONGO_' .env)   # взять MONGO_USER и MONGO_PASSWORD из .env
+docker compose exec mongo mongosh -u "$MONGO_USER" -p "$MONGO_PASSWORD" --authenticationDatabase admin telethreads
+```
+
+Примеры запросов внутри mongosh:
+
+```js
+db.posts.find().sort({_id: -1}).limit(5)        // последние 5 постов
+db.posts.find({status: "Failed"}, {lastError: 1}) // упавшие посты и причина
+db.posts.countDocuments({status: "Published"})   // сколько опубликовано
+```
+
+Выход — `exit`.
+
+**Резервная копия** базы и фото:
+
+```bash
+export $(grep '^MONGO_' .env)
+docker compose exec -T mongo mongodump -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin --db telethreads --archive > telethreads-mongo.archive
 docker run --rm -v telethreads-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/telethreads-data.tgz -C /data .
-docker compose start
+  tar czf /backup/telethreads-media.tgz -C /data media
+```
+
+`mongodump` работает на ходу, останавливать сервис не нужно. Восстановление базы из копии:
+
+```bash
+docker compose exec -T mongo mongorestore -u "$MONGO_USER" -p "$MONGO_PASSWORD" \
+  --authenticationDatabase admin --drop --archive < telethreads-mongo.archive
 ```
 
 ## 7. Включение реальной публикации в Threads (позже)
